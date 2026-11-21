@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.api.v1.router import router as api_v1_router
 from app.config import settings
+from app.core.exceptions import global_exception_handler
 from app.core.logger import logger, setup_logging
 from app.database import init_db
 from app.scheduler import start_scheduler
@@ -40,6 +41,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 # Создание приложения FastAPI
 app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG, lifespan=lifespan)
+
+# Регистрация глобального обработчика всех необработанных исключений
+app.add_exception_handler(Exception, global_exception_handler)
 
 # Подключение маршрутов v1 с префиксом из настроек
 app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
