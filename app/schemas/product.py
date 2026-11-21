@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProductBase(BaseModel):
@@ -38,5 +38,5 @@ class ProductResponse(ProductBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True  # Важно для преобразования SQLAlchemy моделей в Pydantic
+    # Важно для преобразования SQLAlchemy моделей в Pydantic
+    model_config = ConfigDict(from_attributes=True)
