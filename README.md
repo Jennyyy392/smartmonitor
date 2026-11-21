@@ -1,4 +1,5 @@
 # SmartMonitor
+![Build Status](https://img.shields.io/github/actions/workflow/status/Jennyyy392/smartmonitor/ci.yml?branch=main&label=build&style=for-the-badge)
 
 **SmartMonitor** — учебно-боевой проект мониторинга цен. Сервис отслеживает
 изменение цен на товары и помогает вовремя замечать выгодные предложения.
