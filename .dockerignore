@@ -1,0 +1,14 @@
+# Файлы и каталоги, которые не должны попадать в образ контейнера
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+.env
+*.db
+.pytest_cache/
+.ruff_cache/
+.git/

@@ -1,0 +1,20 @@
+version: '3.8'
+
+# Конфигурация для запуска SmartMonitor в Docker
+services:
+  api:
+    build:
+      # Контекст сборки — корень проекта (на уровень выше каталога docker/)
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: smartmonitor_api
+    ports:
+      # Проброс порта: хост:контейнер
+      - "8000:8000"
+    env_file:
+      # Переменные окружения из файла .env в корне проекта
+      - ../.env
+    volumes:
+      # Монтируем файл базы данных, чтобы данные сохранялись между перезапусками
+      - ../smartmonitor.db:/app/smartmonitor.db
+    restart: unless-stopped
