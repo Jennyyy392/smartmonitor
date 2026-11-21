@@ -10,6 +10,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logger import logger
 from app.db.models.product import Product
 from app.schemas.product import ProductCreate, ProductUpdate
 
@@ -91,8 +92,16 @@ async def check_and_update_price(db: AsyncSession, product_id: int) -> Product |
             await db.commit()
             await db.refresh(product)
 
+            # Логируем успешный запрос к сайту товара
+            logger.info("Успешный запрос к сайту", product_id=product.id, url=product.url)
+
     except httpx.HTTPError as e:
-        # Если сайт недоступен, просто логируем (в будущем добавим structlog)
-        print(f"Ошибка при проверке цены для {product.url}: {e}")
+        # Если сайт недоступен, логируем ошибку с контекстом товара
+        logger.error(
+            "Ошибка при проверке цены",
+            product_id=product.id,
+            url=product.url,
+            error=str(e),
+        )
 
     return product

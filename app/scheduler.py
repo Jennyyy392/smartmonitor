@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import select
 
+from app.core.logger import logger
 from app.database import async_session_maker
 from app.db.models.product import Product
 from app.services import product_service
@@ -24,21 +25,30 @@ async def check_all_prices() -> None:
         result = await db.execute(select(Product))
         products = result.scalars().all()
 
-        print(f"🔄 Запущена проверка цен для {len(products)} товаров...")
+        logger.info("Запущена фоновая проверка цен", products_count=len(products))
 
         for product in products:
             try:
                 await product_service.check_and_update_price(db, product.id)
-                print(f"✅ Проверен товар: {product.name} (ID: {product.id})")
+                logger.info(
+                    "Товар успешно проверен",
+                    product_id=product.id,
+                    product_name=product.name,
+                )
 
                 # Проверяем, упала ли цена до целевой или ниже
                 if product.current_price is not None and product.target_price is not None:
                     if product.current_price <= product.target_price:
                         await send_max_notification(product)
             except Exception as e:
-                print(f"❌ Ошибка при проверке {product.name}: {e}")
+                logger.error(
+                    "Ошибка при проверке товара",
+                    product_id=product.id,
+                    product_name=product.name,
+                    error=str(e),
+                )
 
-        print("🏁 Проверка завершена")
+        logger.info("Фоновая проверка цен завершена")
 
 
 def start_scheduler() -> AsyncIOScheduler:
@@ -56,5 +66,5 @@ def start_scheduler() -> AsyncIOScheduler:
     )
 
     scheduler.start()
-    print("📅 Планировщик задач запущен. Проверка цен каждые 5 минут.")
+    logger.info("Планировщик задач запущен", interval_minutes=5)
     return scheduler

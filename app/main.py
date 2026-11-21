@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 from app.api.v1.router import router as api_v1_router
 from app.config import settings
+from app.core.logger import logger, setup_logging
 from app.database import init_db
 from app.scheduler import start_scheduler
 
@@ -19,6 +20,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Жизненный цикл приложения: инициализация БД и запуск планировщика."""
     global scheduler_instance
 
+    # Настраиваем логирование в самом начале запуска приложения
+    setup_logging()
+    logger.info("Приложение запускается", debug_mode=settings.DEBUG)
+
     # Создаём таблицы в базе данных при запуске приложения
     await init_db()
 
@@ -30,7 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Код, который выполняется при ОСТАНОВКЕ приложения
     if scheduler_instance:
         scheduler_instance.shutdown()
-        print("🛑 Планировщик остановлен")
+        logger.info("Планировщик остановлен")
 
 
 # Создание приложения FastAPI
