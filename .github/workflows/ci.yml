@@ -1,0 +1,47 @@
+name: CI
+
+# Пайплайн запускается при каждом push и pull_request в ветку main
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      # Получение кода из репозитория
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Установка нужной версии Python
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Кэширование pip для ускорения следующих запусков
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # Установка зависимостей из requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Проверка кода линтером
+      - name: Run Ruff
+        run: ruff check .
+
+      # Запуск тестов
+      - name: Run Pytest
+        run: pytest -v
