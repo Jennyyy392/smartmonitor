@@ -107,7 +107,8 @@ alembic current
 | `POST`   | `/api/v1/products/`                  | Создать товар для отслеживания             |
 | `GET`    | `/api/v1/products/`                  | Получить список всех товаров               |
 | `GET`    | `/api/v1/products/{id}`              | Получить товар по ID                       |
-| `PUT`    | `/api/v1/products/{id}`              | Частично обновить товар                    |
+| `PATCH`  | `/api/v1/products/{id}`              | Частично обновить товар (основной)         |
+| `PUT`    | `/api/v1/products/{id}`              | Частично обновить товар (устаревший alias) |
 | `DELETE` | `/api/v1/products/{id}`              | Удалить товар                              |
 | `POST`   | `/api/v1/products/{id}/check-price`  | Запустить проверку цены вручную            |
 

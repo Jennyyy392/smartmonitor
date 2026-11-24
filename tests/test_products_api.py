@@ -80,7 +80,7 @@ async def test_get_product_not_found(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_update_product(client: AsyncClient):
-    """Тест обновления товара."""
+    """Тест частичного обновления товара (PATCH)."""
     # Создаем товар
     payload = {
         "name": "Test Product",
@@ -92,12 +92,46 @@ async def test_update_product(client: AsyncClient):
 
     # Обновляем
     update_payload = {"name": "Updated Product", "target_price": 2000.0}
-    response = await client.put(f"/api/v1/products/{product_id}", json=update_payload)
+    response = await client.patch(f"/api/v1/products/{product_id}", json=update_payload)
 
     assert response.status_code == 200
     data = response.json()
     assert data["name"] == "Updated Product"
     assert data["target_price"] == 2000.0
+
+
+@pytest.mark.asyncio
+async def test_update_product_put_backward_compatible(client: AsyncClient):
+    """PUT оставлен для обратной совместимости."""
+    payload = {
+        "name": "Test Product",
+        "url": "https://example.com/test",
+        "target_price": 1000.0,
+    }
+    create_response = await client.post("/api/v1/products/", json=payload)
+    product_id = create_response.json()["id"]
+
+    response = await client.put(
+        f"/api/v1/products/{product_id}", json={"name": "Put Product"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Put Product"
+
+
+@pytest.mark.asyncio
+async def test_create_product_decimal_price(client: AsyncClient):
+    """Цена с копейками сохраняется без потери точности (Decimal)."""
+    payload = {
+        "name": "Decimal Product",
+        "url": "https://example.com/decimal",
+        "target_price": 1999.99,
+    }
+
+    response = await client.post("/api/v1/products/", json=payload)
+
+    assert response.status_code == 201
+    assert response.json()["target_price"] == 1999.99
 
 
 @pytest.mark.asyncio

@@ -1,41 +1,82 @@
 """Сервис уведомлений SmartMonitor.
 
-Здесь сосредоточена логика отправки уведомлений о падении цены
-во внешние мессенджеры (сейчас — MAX в режиме Mock).
+Отправка уведомлений о падении цены во внешние мессенджеры.
+Реализован паттерн Strategy: конкретная реализация выбирается
+через настройку NOTIFICATION_BACKEND.
 """
 
-# httpx понадобится для реального API MAX (код ниже), пока закомментирован.
-import httpx  # noqa: F401
+from typing import Protocol
 
+import httpx
+
+from app.config import settings
 from app.core.logger import logger
 from app.db.models.product import Product
 
 
-async def send_max_notification(product: Product) -> bool:
-    """
-    Отправляет уведомление в мессенджер MAX о падении цены.
-    Сейчас это Mock (имитация), но структура полностью готова для реального API.
-    """
-    if product.current_price is None or product.target_price is None:
-        return False
+class NotificationSender(Protocol):
+    """Общий интерфейс отправителя уведомлений."""
 
-    if product.current_price <= product.target_price:
-        # --- ПРОДАКШЕН КОД (раскомментировать при наличии API ключа MAX) ---
-        # max_api_url = "`https://api.max-messenger.ru/v1/messages/send`"
-        # headers = {"Authorization": "Bearer YOUR_MAX_API_KEY"}
-        # payload = {"chat_id": "YOUR_CHAT_ID", "text": f"Цена упала: {product.name}"}
-        # ... (логика httpx запроса) ...
-        # -------------------------------------------------------------------
+    async def send_alert(self, product: Product) -> bool:
+        """Отправляет уведомление о товаре. Возвращает True при успехе."""
+        ...
 
-        # --- MOCK ДЛЯ ТЕСТИРОВАНИЯ АРХИТЕКТУРЫ ---
+
+class MockNotificationSender:
+    """Имитация отправки уведомления (используется по умолчанию)."""
+
+    async def send_alert(self, product: Product) -> bool:
         logger.info(
             "[MAX API MOCK] Имитация отправки уведомления о падении цены",
             product_id=product.id,
             product_name=product.name,
             current_price=product.current_price,
             target_price=product.target_price,
-            url=product.url
+            url=product.url,
         )
         return True
 
-    return False
+
+class MaxNotificationSender:
+    """Отправка уведомления через реальный API MAX."""
+
+    async def send_alert(self, product: Product) -> bool:
+        text = (
+            f"Цена упала: {product.name}\n"
+            f"Текущая цена: {product.current_price}\n"
+            f"Целевая цена: {product.target_price}\n"
+            f"{product.url}"
+        )
+        payload = {"chat_id": settings.MAX_CHAT_ID, "text": text}
+        headers = {"Authorization": f"Bearer {settings.MAX_API_TOKEN}"}
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{settings.MAX_API_URL}/messages/send",
+                    json=payload,
+                    headers=headers,
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as e:
+            logger.error(
+                "Ошибка отправки уведомления в MAX",
+                product_id=product.id,
+                url=product.url,
+                error=str(e),
+            )
+            return False
+
+        logger.info(
+            "Уведомление отправлено в MAX",
+            product_id=product.id,
+            product_name=product.name,
+        )
+        return True
+
+
+def get_notification_sender() -> NotificationSender:
+    """Возвращает отправителя, выбранного настройкой NOTIFICATION_BACKEND."""
+    if settings.NOTIFICATION_BACKEND == "max":
+        return MaxNotificationSender()
+    return MockNotificationSender()

@@ -35,7 +35,8 @@ async def get_product_endpoint(product_id: int, db: AsyncSession = Depends(get_d
     return product
 
 
-@router.put("/{product_id}", response_model=ProductResponse)
+@router.patch("/{product_id}", response_model=ProductResponse)
+@router.put("/{product_id}", response_model=ProductResponse, include_in_schema=False)
 async def update_product_endpoint(
     product_id: int,
     product_in: ProductUpdate,

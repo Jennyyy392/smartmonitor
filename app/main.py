@@ -11,6 +11,7 @@ from app.core.exceptions import global_exception_handler
 from app.core.logger import logger, setup_logging
 from app.database import init_db
 from app.scheduler import start_scheduler
+from app.services.product_service import close_http_client
 
 # Ссылка на запущенный планировщик задач (доступна на уровне модуля)
 scheduler_instance = None
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if scheduler_instance:
         scheduler_instance.shutdown()
         logger.info("Планировщик остановлен")
+
+    # Закрываем общий HTTP-клиент
+    await close_http_client()
 
 
 # Создание приложения FastAPI

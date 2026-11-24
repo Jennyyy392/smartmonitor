@@ -5,6 +5,7 @@ API-эндпоинты лишь вызывают функции сервиса �
 """
 
 import random
+from decimal import ROUND_HALF_UP, Decimal
 
 import httpx
 from sqlalchemy import select
@@ -13,6 +14,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logger import logger
 from app.db.models.product import Product
 from app.schemas.product import ProductCreate, ProductUpdate
+from app.services.notification_service import get_notification_sender
+
+# Переиспользуемый HTTP-клиент с базовым User-Agent
+_http_client: httpx.AsyncClient | None = None
+
+_PRICE_QUANT = Decimal("0.01")
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Возвращает единый (лениво созданный) HTTP-клиент приложения."""
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=10.0,
+            follow_redirects=True,
+            headers={"User-Agent": "SmartMonitor/1.0 (+https://github.com/smartmonitor)"},
+        )
+    return _http_client
+
+
+async def close_http_client() -> None:
+    """Закрывает единый HTTP-клиент при остановке приложения."""
+    global _http_client
+    if _http_client is not None and not _http_client.is_closed:
+        await _http_client.aclose()
+    _http_client = None
 
 
 async def create_product(db: AsyncSession, product_in: ProductCreate) -> Product:
@@ -33,7 +60,13 @@ async def get_product(db: AsyncSession, product_id: int) -> Product | None:
 async def get_all_products(db: AsyncSession) -> list[Product]:
     """Получает список всех товаров."""
     result = await db.execute(select(Product))
-    return result.scalars().all()
+    return list(result.scalars().all())
+
+
+async def get_product_ids(db: AsyncSession) -> list[int]:
+    """Получает список ID всех товаров."""
+    result = await db.execute(select(Product.id))
+    return list(result.scalars().all())
 
 
 async def update_product(
@@ -65,7 +98,8 @@ async def delete_product(db: AsyncSession, product_id: int) -> bool:
 
 async def check_and_update_price(db: AsyncSession, product_id: int) -> Product | None:
     """
-    Асинхронно заходит на URL товара и обновляет current_price.
+    Асинхронно заходит на URL товара, обновляет current_price
+    и при достижении target_price отправляет уведомление.
     ВНИМАНИЕ: Для учебных целей мы делаем упрощенный запрос через httpx.
     В реальном проекте с защитой (Ozon/WB) здесь будет Playwright.
     """
@@ -74,26 +108,39 @@ async def check_and_update_price(db: AsyncSession, product_id: int) -> Product |
         return None
 
     try:
-        # Делаем асинхронный HTTP-запрос
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(product.url, follow_redirects=True)
-            response.raise_for_status()
+        # Делаем асинхронный HTTP-запрос переиспользуемым клиентом
+        client = get_http_client()
+        response = await client.get(product.url)
+        response.raise_for_status()
 
-            # УЧЕБНАЯ ЗАГЛУШКА: Поскольку Ozon блокирует простые запросы,
-            # мы симулируем успешный парсинг, генерируя цену около target_price.
-            # В будущем здесь будет BeautifulSoup или Playwright для реального парсинга.
-            simulated_price = (
-                product.target_price * random.uniform(0.9, 1.1)
-                if product.target_price
-                else 50000.0
-            )
+        # УЧЕБНАЯ ЗАГЛУШКА: Поскольку Ozon блокирует простые запросы,
+        # мы симулируем успешный парсинг, генерируя цену около target_price.
+        # В будущем здесь будет BeautifulSoup или Playwright для реального парсинга.
+        if product.target_price is not None:
+            factor = Decimal(str(random.uniform(0.9, 1.1)))
+            simulated_price = product.target_price * factor
+        else:
+            simulated_price = Decimal("50000.00")
 
-            product.current_price = round(simulated_price, 2)
-            await db.commit()
-            await db.refresh(product)
+        product.current_price = simulated_price.quantize(
+            _PRICE_QUANT, rounding=ROUND_HALF_UP
+        )
 
-            # Логируем успешный запрос к сайту товара
-            logger.info("Успешный запрос к сайту", product_id=product.id, url=product.url)
+        # Логика уведомления: шлем один раз при достижении цели,
+        # сбрасываем флаг, если цена снова выросла выше target_price.
+        if product.target_price is not None:
+            if product.current_price <= product.target_price:
+                if not product.is_notified:
+                    product.is_notified = True
+                    await get_notification_sender().send_alert(product)
+            elif product.is_notified:
+                product.is_notified = False
+
+        await db.commit()
+        await db.refresh(product)
+
+        # Логируем успешный запрос к сайту товара
+        logger.info("Успешный запрос к сайту", product_id=product.id, url=product.url)
 
     except httpx.HTTPError as e:
         # Если сайт недоступен, логируем ошибку с контекстом товара
