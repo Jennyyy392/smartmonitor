@@ -11,35 +11,13 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.http import get_http_client
 from app.core.logger import logger
 from app.db.models.product import Product
 from app.schemas.product import ProductCreate, ProductUpdate
 from app.services.notification_service import get_notification_sender
 
-# Переиспользуемый HTTP-клиент с базовым User-Agent
-_http_client: httpx.AsyncClient | None = None
-
 _PRICE_QUANT = Decimal("0.01")
-
-
-def get_http_client() -> httpx.AsyncClient:
-    """Возвращает единый (лениво созданный) HTTP-клиент приложения."""
-    global _http_client
-    if _http_client is None or _http_client.is_closed:
-        _http_client = httpx.AsyncClient(
-            timeout=10.0,
-            follow_redirects=True,
-            headers={"User-Agent": "SmartMonitor/1.0 (+https://github.com/smartmonitor)"},
-        )
-    return _http_client
-
-
-async def close_http_client() -> None:
-    """Закрывает единый HTTP-клиент при остановке приложения."""
-    global _http_client
-    if _http_client is not None and not _http_client.is_closed:
-        await _http_client.aclose()
-    _http_client = None
 
 
 async def create_product(db: AsyncSession, product_in: ProductCreate) -> Product:
@@ -57,9 +35,11 @@ async def get_product(db: AsyncSession, product_id: int) -> Product | None:
     return result.scalar_one_or_none()
 
 
-async def get_all_products(db: AsyncSession) -> list[Product]:
-    """Получает список всех товаров."""
-    result = await db.execute(select(Product))
+async def get_all_products(
+    db: AsyncSession, limit: int = 50, offset: int = 0
+) -> list[Product]:
+    """Получает список товаров с пагинацией."""
+    result = await db.execute(select(Product).limit(limit).offset(offset))
     return list(result.scalars().all())
 
 

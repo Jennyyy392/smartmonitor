@@ -12,6 +12,9 @@ services:
     env_file:
       # Переменные окружения из файла .env в корне проекта
       - ../.env
+    environment:
+      # Планировщик запускается в отдельном сервисе worker
+      ENABLE_SCHEDULER: "false"
     volumes:
       # Монтируем каталог с данными, чтобы база сохранялась между перезапусками
       - ../data:/app/data
@@ -32,4 +35,24 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build:
+      # Тот же образ, что и у api
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: smartmonitor_worker
+    # Запускаем только планировщик, без HTTP-сервера
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - ../.env
+    environment:
+      ENABLE_SCHEDULER: "true"
+    volumes:
+      # Общий каталог с базой данных
+      - ../data:/app/data
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped

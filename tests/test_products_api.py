@@ -49,6 +49,45 @@ async def test_get_products(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_get_products_pagination(client: AsyncClient):
+    """Тест пагинации: limit и offset ограничивают выборку."""
+    for i in range(3):
+        await client.post(
+            "/api/v1/products/",
+            json={
+                "name": f"Product {i}",
+                "url": f"https://example.com/{i}",
+                "target_price": 1000.0,
+            },
+        )
+
+    response = await client.get("/api/v1/products/", params={"limit": 2, "offset": 0})
+
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+
+    response_offset = await client.get(
+        "/api/v1/products/", params={"limit": 2, "offset": 2}
+    )
+
+    assert response_offset.status_code == 200
+    assert len(response_offset.json()) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_products_pagination_validation(client: AsyncClient):
+    """Тест валидации query-параметров пагинации."""
+    response_limit = await client.get("/api/v1/products/", params={"limit": 0})
+    assert response_limit.status_code == 422
+
+    response_limit_high = await client.get("/api/v1/products/", params={"limit": 101})
+    assert response_limit_high.status_code == 422
+
+    response_offset = await client.get("/api/v1/products/", params={"offset": -1})
+    assert response_offset.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_product_by_id(client: AsyncClient):
     """Тест получения товара по ID."""
     # Создаем товар

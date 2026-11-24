@@ -8,10 +8,9 @@ from fastapi import FastAPI
 from app.api.v1.router import router as api_v1_router
 from app.config import settings
 from app.core.exceptions import global_exception_handler
+from app.core.http import close_http_client
 from app.core.logger import logger, setup_logging
-from app.database import init_db
 from app.scheduler import start_scheduler
-from app.services.product_service import close_http_client
 
 # Ссылка на запущенный планировщик задач (доступна на уровне модуля)
 scheduler_instance = None
@@ -19,18 +18,20 @@ scheduler_instance = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Жизненный цикл приложения: инициализация БД и запуск планировщика."""
+    """Жизненный цикл приложения: запуск и остановка планировщика."""
     global scheduler_instance
 
     # Настраиваем логирование в самом начале запуска приложения
     setup_logging()
     logger.info("Приложение запускается", debug_mode=settings.DEBUG)
 
-    # Создаём таблицы в базе данных при запуске приложения
-    await init_db()
+    # Схема БД управляется миграциями Alembic (alembic upgrade head)
 
     # Код, который выполняется при ЗАПУСКЕ приложения
-    scheduler_instance = start_scheduler()
+    if settings.ENABLE_SCHEDULER:
+        scheduler_instance = start_scheduler()
+    else:
+        logger.info("Планировщик отключен (ENABLE_SCHEDULER=false)")
 
     yield  # Здесь работает приложение
 

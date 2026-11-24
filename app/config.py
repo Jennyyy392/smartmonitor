@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./data/smartmonitor.db"
     # Интервал фоновой проверки цен (в минутах)
     CHECK_INTERVAL_MINUTES: int = 5
+    # Запускать ли планировщик фоновых задач в текущем процессе
+    ENABLE_SCHEDULER: bool = True
     # Бэкенд уведомлений: "mock" — имитация, "max" — реальный API MAX
     NOTIFICATION_BACKEND: Literal["mock", "max"] = "mock"
     # Параметры API MAX (используются при NOTIFICATION_BACKEND="max")

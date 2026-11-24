@@ -3,17 +3,29 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import (
+    AnyHttpUrl,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+)
 
 
 class ProductBase(BaseModel):
     """Базовые поля товара, общие для создания и ответа."""
 
     name: str = Field(..., min_length=2, max_length=100, description="Название товара")
-    url: str = Field(..., description="Ссылка на товар")
+    url: str = Field(..., description="Ссылка на товар (http/https)")
     target_price: Decimal | None = Field(
-        None, description="Желаемая цена для уведомления"
+        None, gt=0, max_digits=12, decimal_places=2, description="Желаемая цена для уведомления"
     )
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str) -> str:
+        return str(AnyHttpUrl(value))
 
     @field_serializer("target_price", when_used="json")
     def _serialize_target_price(self, value: Decimal | None) -> float | None:
@@ -29,10 +41,19 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     """Схема для частичного обновления товара."""
 
-    name: str | None = None
-    url: str | None = None
-    current_price: Decimal | None = None
-    target_price: Decimal | None = None
+    name: str | None = Field(None, min_length=2, max_length=100, description="Название товара")
+    url: str | None = Field(None, description="Ссылка на товар (http/https)")
+    current_price: Decimal | None = Field(
+        None, gt=0, max_digits=12, decimal_places=2, description="Текущая цена"
+    )
+    target_price: Decimal | None = Field(
+        None, gt=0, max_digits=12, decimal_places=2, description="Желаемая цена для уведомления"
+    )
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, value: str | None) -> str | None:
+        return str(AnyHttpUrl(value)) if value is not None else None
 
 
 class ProductResponse(ProductBase):

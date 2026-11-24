@@ -4,7 +4,7 @@
 здесь остаётся только обработка HTTP-запросов и ответов.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -23,8 +23,12 @@ async def create_product_endpoint(
 
 
 @router.get("/", response_model=list[ProductResponse])
-async def get_products_endpoint(db: AsyncSession = Depends(get_db)):
-    return await product_service.get_all_products(db)
+async def get_products_endpoint(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    return await product_service.get_all_products(db, limit=limit, offset=offset)
 
 
 @router.get("/{product_id}", response_model=ProductResponse)

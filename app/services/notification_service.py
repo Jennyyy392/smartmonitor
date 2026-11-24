@@ -10,6 +10,7 @@ from typing import Protocol
 import httpx
 
 from app.config import settings
+from app.core.http import get_http_client
 from app.core.logger import logger
 from app.db.models.product import Product
 
@@ -51,13 +52,12 @@ class MaxNotificationSender:
         headers = {"Authorization": f"Bearer {settings.MAX_API_TOKEN}"}
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{settings.MAX_API_URL}/messages/send",
-                    json=payload,
-                    headers=headers,
-                )
-                response.raise_for_status()
+            response = await get_http_client().post(
+                f"{settings.MAX_API_URL}/messages/send",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
         except httpx.HTTPError as e:
             logger.error(
                 "Ошибка отправки уведомления в MAX",

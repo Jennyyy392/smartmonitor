@@ -16,7 +16,7 @@ graph TD
     API -->|Dependency Injection| Service[Service Layer]
     Service -->|Async SQLAlchemy| DB[(SQLite / Alembic Migrations)]
     Service -->|HTTPX| External[Внешние сайты / Парсинг]
-    Scheduler[APScheduler Background Worker] -->|Trigger| Service
+    Scheduler[APScheduler Worker / app/worker.py] -->|Trigger| Service
     Service -->|Structlog JSON/Console| Logs[Система логирования]
 ```
 
@@ -25,7 +25,7 @@ graph TD
 1. **HTTP-слой** (`app/api`) принимает запрос, валидирует данные через Pydantic-схемы и делегирует работу сервису.
 2. **Сервисный слой** (`app/services`) содержит бизнес-логику и обращается к БД и внешним сайтам.
 3. **Слой данных** (`app/db`) описывает ORM-модели, а миграции управляются через Alembic.
-4. **Фоновый воркер** (`APScheduler`) периодически запускает проверку цен, не блокируя обработку HTTP-запросов.
+4. **Фоновый воркер** (`APScheduler`) периодически запускает проверку цен, не блокируя обработку HTTP-запросов. Запуск управляется флагом `ENABLE_SCHEDULER`: в локальной разработке планировщик живёт в процессе API (`lifespan`), в Docker — в отдельном процессе `app/worker.py` (сервис `worker`).
 
 ## 🛠 Технологический стек и обоснование выбора
 
@@ -52,11 +52,18 @@ cd smartmonitor
 # 2. Создать файл окружения (при необходимости)
 echo "DEBUG=False" > .env
 
-# 3. Собрать и запустить контейнер
+# 3. Собрать и запустить контейнеры (api + worker)
 docker-compose -f docker/docker-compose.yml up -d --build
 ```
 
 Приложение будет доступно по адресу: <http://localhost:8000/docs>
+
+Поднимаются два сервиса:
+
+- `api` — HTTP-сервер (`uvicorn app.main:app`), запускается с `ENABLE_SCHEDULER=false`;
+- `worker` — отдельный процесс планировщика (`python -m app.worker`) с `ENABLE_SCHEDULER=true`, стартует после успешного health-check сервиса `api`.
+
+Миграции `alembic upgrade head` применяются автоматически при старте контейнера: `docker/entrypoint.sh` подготавливает каталог `/app/data` (проверяет владельца и сбрасывает привилегии root → `appuser` через `gosu`), после чего выполняется `CMD` образа — `alembic upgrade head && uvicorn app.main:app ...`. Оба сервиса используют один смонтированный каталог `./data` с файлом SQLite.
 
 ### Вариант 2: Локальный запуск
 
@@ -105,12 +112,23 @@ alembic current
 | `GET`    | `/`                                  | Корневой маршрут, статус сервиса           |
 | `GET`    | `/api/v1/health`                     | Проверка работоспособности (health-check)  |
 | `POST`   | `/api/v1/products/`                  | Создать товар для отслеживания             |
-| `GET`    | `/api/v1/products/`                  | Получить список всех товаров               |
+| `GET`    | `/api/v1/products/`                  | Получить список товаров (с пагинацией)     |
 | `GET`    | `/api/v1/products/{id}`              | Получить товар по ID                       |
 | `PATCH`  | `/api/v1/products/{id}`              | Частично обновить товар (основной)         |
 | `PUT`    | `/api/v1/products/{id}`              | Частично обновить товар (устаревший alias) |
 | `DELETE` | `/api/v1/products/{id}`              | Удалить товар                              |
 | `POST`   | `/api/v1/products/{id}/check-price`  | Запустить проверку цены вручную            |
+
+### Пагинация `GET /api/v1/products/`
+
+| Параметр | Тип  | По умолчанию | Ограничения | Описание                          |
+| -------- | ---- | ------------ | ----------- | --------------------------------- |
+| `limit`  | int  | `50`         | `1..100`    | Максимальное число товаров в ответе |
+| `offset` | int  | `0`          | `>= 0`      | Смещение от начала выборки        |
+
+```bash
+curl "http://127.0.0.1:8000/api/v1/products/?limit=20&offset=40"
+```
 
 ### Пример запроса
 
@@ -133,13 +151,14 @@ curl -X POST http://127.0.0.1:8000/api/v1/products/ \
 | `APP_NAME`        | `SmartMonitor`                                 | Название сервиса                      |
 | `DEBUG`           | `True`                                         | Режим отладки (влияет на логи и echo) |
 | `API_V1_PREFIX`   | `/api/v1`                                      | Префикс маршрутов v1                  |
-| `DATABASE_URL`    | `sqlite+aiosqlite:///./smartmonitor.db`        | DSN подключения к базе данных         |
+| `DATABASE_URL`    | `sqlite+aiosqlite:///./data/smartmonitor.db`   | DSN подключения к базе данных         |
+| `ENABLE_SCHEDULER`| `True`                                         | Запускать планировщик в процессе (в Docker: `false` для `api`, `true` для `worker`) |
 
 ## 🧩 Ключевые инженерные решения
 
 ### Асинхронность из коробки
 
-Все слои приложения асинхронны: FastAPI-эндпоинты, сервисы, SQLAlchemy-сессии (`AsyncSession`) и HTTP-запросы через `httpx.AsyncClient`. Это позволяет обслуживать множество запросов без блокировки event loop, а фоновый воркер работает в том же процессе, не мешая обработке HTTP-трафика.
+Все слои приложения асинхронны: FastAPI-эндпоинты, сервисы, SQLAlchemy-сессии (`AsyncSession`) и HTTP-запросы через общий `httpx.AsyncClient` из `app/core/http.py`. Это позволяет обслуживать множество запросов без блокировки event loop, а фоновый воркер не мешает обработке HTTP-трафика: локально он работает в процессе API, в Docker — в отдельном контейнере `worker`.
 
 ### Глобальная обработка ошибок
 
@@ -151,7 +170,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/products/ \
 
 ### Фоновые задачи (APScheduler)
 
-Планировщик запускается в `lifespan`-контексте приложения и корректно останавливается при выключении. Задача `check_all_prices` выполняется каждые 5 минут, имеет защиту `max_instances=1` (новая задача не стартует, пока работает предыдущая) и изолированную обработку ошибок по каждому товару.
+Планировщик запускается только при `ENABLE_SCHEDULER=True` (значение по умолчанию). В локальной разработке он стартует в `lifespan`-контексте приложения и корректно останавливается при выключении. В Docker `api` запускается с `ENABLE_SCHEDULER=false`, а планировщик вынесен в отдельный сервис `worker` (`python -m app.worker`), который масштабируется независимо от HTTP-слоя и не дублирует фоновые задачи при нескольких репликах API. Задача `check_all_prices` выполняется каждые `CHECK_INTERVAL_MINUTES` минут (по умолчанию 5), имеет защиту `max_instances=1`, ограничение параллелизма `MAX_CONCURRENT_CHECKS=5` и изолированную сессию БД с обработкой ошибок по каждому товару.
 
 ## 🧪 Тестирование
 
@@ -188,18 +207,27 @@ ruff format .
 smartmonitor/
 ├── app/
 │   ├── main.py              # точка входа, lifespan, регистрация обработчиков
+│   ├── worker.py            # отдельный процесс планировщика (python -m app.worker)
 │   ├── config.py            # настройки (pydantic-settings)
 │   ├── database.py          # асинхронный движок и сессии SQLAlchemy
-│   ├── scheduler.py         # фоновый планировщик проверки цен
-│   ├── api/v1/              # HTTP-слой: роутеры и эндпоинты
-│   ├── core/                # логирование и глобальная обработка ошибок
+│   ├── scheduler.py         # фоновый планировщик проверки цен (APScheduler)
+│   ├── api/v1/              # HTTP-слой: роутеры и эндпоинты (products, health)
+│   ├── core/
+│   │   ├── http.py          # единый переиспользуемый httpx.AsyncClient
+│   │   ├── logger.py        # structlog: цветной вывод / JSON
+│   │   └── exceptions.py    # глобальная обработка ошибок
 │   ├── db/                  # ORM-модели и declarative base
 │   ├── schemas/             # Pydantic-схемы (валидация)
-│   └── services/            # бизнес-логика (Service Layer)
+│   └── services/            # бизнес-логика (product_service, notification_service)
 ├── alembic/                 # миграции базы данных
-├── docker/                  # Dockerfile и docker-compose
-├── tests/                   # pytest-тесты (unit / integration)
-├── scripts/                 # вспомогательные скрипты
+├── docker/
+│   ├── Dockerfile           # образ приложения
+│   ├── docker-compose.yml   # сервисы api и worker
+│   └── entrypoint.sh        # подготовка ./data и сброс привилегий до appuser
+├── tests/
+│   ├── conftest.py          # фикстуры: in-memory SQLite и AsyncClient
+│   └── test_products_api.py # тесты CRUD-эндпоинтов товаров
+├── scripts/                 # зарезервировано под вспомогательные скрипты (пока только .gitkeep)
 └── .github/workflows/       # CI/CD пайплайн
 ```
 
